@@ -439,6 +439,9 @@ swallow(Client *p, Client *c)
 	detach(c);
 	detachstack(c);
 
+	setclientstate(c, WithdrawnState);
+	XUnmapWindow(dpy, p->win);
+
 	p->swallowing = c;
 	c->mon = p->mon;
 
@@ -461,6 +464,7 @@ unswallow(Client *c)
 
 	updatetitle(c);
 	arrange(c->mon);
+	XMapWindow(dpy, c->win);
 	XMoveResizeWindow(dpy, c->win, c->x, c->y, c->w, c->h);
 	configure(c);
 }
