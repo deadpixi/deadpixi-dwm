@@ -20,6 +20,7 @@
  *
  * To understand everything else, start reading main().
  */
+#define static
 #include <errno.h>
 #include <locale.h>
 #include <signal.h>
@@ -216,7 +217,7 @@ static void setup(void);
 static void showhide(Client *c);
 static void sigchld(int unused);
 static void spawn(const Arg *arg);
-static Client *swallowingclient(const Client *c);
+static Client *swallowingclient(Window w);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
 static Client *termforwin(const Client *c);
@@ -533,7 +534,7 @@ cleanup(void)
 	selmon->lt[selmon->sellt] = &foo;
 	for (m = mons; m; m = m->next)
 		while (m->stack)
-			unmanage(m->stack, 0);
+			unmanage(m->stack, 0); // XXX - unmanage swallowing windows too
 	XUngrabKey(dpy, AnyKey, AnyModifier, root);
 	while (mons)
 		cleanupmon(mons);
@@ -724,6 +725,9 @@ destroynotify(XEvent *e)
 
 	if ((c = wintoclient(ev->window)))
 		unmanage(c, 1);
+
+	else if ((c = swallowingclient(ev->window)))
+		unmanage(c->swallowing, 1);
 }
 
 void
@@ -1848,9 +1852,13 @@ unmanage(Client *c, int destroyed)
 		return;
 	}
 
-	Client *s = swallowingclient(c);
-	if (s)
+	Client *s = swallowingclient(c->win);
+	if (s) {
+		free(s->swallowing);
 		s->swallowing = NULL;
+		arrange(m);
+		return;
+	}
 
 	/* The server grab construct avoids race conditions. */
 	detach(c);
@@ -2230,14 +2238,14 @@ termforwin(const Client *w)
 }
 
 Client *
-swallowingclient(const Client *w)
+swallowingclient(Window w)
 {
 	Client *c;
 	Monitor *m;
 
 	for (m = mons; m; m = m->next) {
 		for (c = m->clients; c; c = c->next) {
-			if (c->swallowing && c->swallowing->win == w->win)
+			if (c->swallowing && c->swallowing->win == w)
 				return c;
 		}
 	}
