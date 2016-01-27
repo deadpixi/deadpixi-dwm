@@ -951,23 +951,6 @@ getatomprop(Client *c, Atom prop)
 }
 
 int
-getcardprop(Client *c, Atom prop)
-{
-	int di;
-	unsigned long dl;
-	unsigned char *p = NULL;
-	Atom da = None;
-	int v = 0;
-
-	if (XGetWindowProperty(dpy, c->win, prop, 0L, sizeof(int), False, XA_CARDINAL,
-	                      &da, &di, &dl, &dl, &p) == Success && p) {
-		v = *(int *)p;
-		XFree(p);
-	}
-	return v;
-}
-
-int
 getrootptr(int *x, int *y)
 {
 	int di;
