@@ -52,9 +52,9 @@ and (re)compiling the source code.
 
 Window Swallowing
 -----------------
-This version of dwm supports "window swallowing".  Windows marked
-with the "isterminal" flag (settable by rules in config.h) will
-"swallow" windows opened by descendant processes, similar to the
-behavior of Plan 9's rio.  This feature helps avoid a proliferation
-of terminals used only to launch other commands.
+This version (i.e. Deadpixi) of dwm supports "window swallowing".
+Windows marked with the "isterminal" flag (settable by rules in
+config.h) will "swallow" windows opened by descendant processes,
+similar to the behavior of Plan 9's rio.  This feature helps avoid
+a proliferation of terminals used only to launch other commands.
 
