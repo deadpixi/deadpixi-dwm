@@ -1857,6 +1857,7 @@ unmanage(Client *c, int destroyed)
 		free(s->swallowing);
 		s->swallowing = NULL;
 		arrange(m);
+        focus(NULL);
 		return;
 	}
 
@@ -1877,9 +1878,9 @@ unmanage(Client *c, int destroyed)
 	free(c);
 
 	if (!s) {
+		arrange(m);
 		focus(NULL);
 		updateclientlist();
-		arrange(m);
 	}
 }
 
@@ -2155,7 +2156,7 @@ winpid(Window w)
 	spec.client = w;
 	spec.mask = XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID;
 
-    xcb_generic_error_t *e = NULL;
+	xcb_generic_error_t *e = NULL;
 	xcb_res_query_client_ids_cookie_t c = xcb_res_query_client_ids(xcon, 1, &spec);
 	xcb_res_query_client_ids_reply_t *r = xcb_res_query_client_ids_reply(xcon, c, &e);
 
@@ -2186,23 +2187,14 @@ getparentprocess(pid_t p)
 	unsigned int v = 0;
 
 #ifdef __linux__
+	FILE *f;
 	char buf[256];
-	snprintf(buf, sizeof(buf) - 1, "/proc/%u/status", (unsigned)p);
+	snprintf(buf, sizeof(buf) - 1, "/proc/%u/stat", (unsigned)p);
 
-	FILE *f = fopen(buf, "r");
-	if (!f)
+	if (!(f = fopen(buf, "r")))
 		return 0;
 
-	size_t len = 0;
-	char *line = NULL;
-	ssize_t read;
-
-	while ((read = getline(&line, &len, f)) != -1) {
-		if (sscanf(line, "PPid: %u", &v))
-			break;
-	}
-
-	free(line);
+	fscanf(f, "%*u %*s %*c %u", &v);
 	fclose(f);
 #endif /* __linux__ */
 
