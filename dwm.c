@@ -2152,7 +2152,7 @@ winpid(Window w)
 		return(0);
 	}
 
-	result = (pid_t)prop;
+	result = (pid_t)prop[0];
 	XFree(prop);
 
 	return(result);
