@@ -18,10 +18,10 @@ XINERAMALIBS  = -lXinerama
 XINERAMAFLAGS = -DXINERAMA
 
 # Swalloing, comment if you don't want it
-SWALLOWINGLIBS = -lxcb -lX11-xcb -lxcb-res
+SWALLOWINGLIBS =
 SWALLOWINGFLAGS = -DSWALLOWING
 # FreeBSD (uncomment)
-#SWALLOWINGLIBS = -lxcb -lX11-xcb -lxcb-res -lutil
+#SWALLOWINGLIBS = -lutil
 
 # freetype
 FREETYPELIBS = -lfontconfig -lXft
