@@ -43,6 +43,11 @@
 #ifdef SWALLOWING
 #include <X11/Xlib-xcb.h>
 #include <xcb/res.h>
+#ifdef __FreeBSD__
+#include <libutil.h>
+#include <sys/types.h>
+#include <sys/user.h>
+#endif /* __FreeBSD__ */
 #endif
 
 #include "drw.h"
@@ -2166,9 +2171,10 @@ winpid(Window w)
 pid_t
 getparentprocess(pid_t p)
 {
+#ifdef SWALLOWING
+#ifdef __linux__
 	unsigned int v = 0;
 
-#ifdef __linux__
 	FILE *f;
 	char buf[256];
 	snprintf(buf, sizeof(buf) - 1, "/proc/%u/stat", (unsigned)p);
@@ -2178,9 +2184,24 @@ getparentprocess(pid_t p)
 
 	fscanf(f, "%*u %*s %*c %u", &v);
 	fclose(f);
+	return(v);
 #endif /* __linux__ */
+#ifdef __FreeBSD__
+	pid_t v;
+	struct kinfo_proc *proc;
 
-	return (pid_t)v;
+	proc = kinfo_getproc(p);
+	if (proc == NULL) {
+	    return(0);
+	}
+
+	v = proc->ki_ppid;
+	free(proc);
+	return(v);
+#endif /* __FreeBSD__ */
+#else
+	return (0);
+#endif /* SWALLOWING */
 }
 
 int
