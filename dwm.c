@@ -41,8 +41,6 @@
 #endif /* XINERAMA */
 #include <X11/Xft/Xft.h>
 #ifdef SWALLOWING
-#include <X11/Xlib-xcb.h>
-#include <xcb/res.h>
 #ifdef __FreeBSD__
 #include <libutil.h>
 #include <sys/types.h>
@@ -284,10 +282,6 @@ static Display *dpy;
 static Drw *drw;
 static Monitor *mons, *selmon;
 static Window root;
-
-#ifdef SWALLOWING
-static xcb_connection_t *xcon;
-#endif /* SWALLOWING */
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
@@ -2136,36 +2130,35 @@ view(const Arg *arg)
 pid_t
 winpid(Window w)
 {
-	pid_t result = 0;
-
 #ifdef SWALLOWING
-	xcb_res_client_id_spec_t spec = {0};
-	spec.client = w;
-	spec.mask = XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID;
+	Atom property, actualtype;
+	int actualformat, res;
+	pid_t result;
+	uint32_t *prop;
+	unsigned long nitems, bytesafter;
 
-	xcb_generic_error_t *e = NULL;
-	xcb_res_query_client_ids_cookie_t c = xcb_res_query_client_ids(xcon, 1, &spec);
-	xcb_res_query_client_ids_reply_t *r = xcb_res_query_client_ids_reply(xcon, c, &e);
+	property = XInternAtom(dpy, "_NET_WM_PID", True);
+	if(property == None) {
+		return(0);
+	}
+	actualformat = 0;
+	nitems = 0;
 
-	if (!r)
-		return (pid_t)0;
+	res = XGetWindowProperty(dpy, w, property, False, sizeof(uint32_t), False,
+		XA_CARDINAL, &actualtype, &actualformat, &nitems, &bytesafter,
+		(unsigned char **) &prop);
 
-	xcb_res_client_id_value_iterator_t i = xcb_res_query_client_ids_ids_iterator(r);
-	for (; i.rem; xcb_res_client_id_value_next(&i)) {
-		spec = i.data->spec;
-		if (spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID) {
-			uint32_t *t = xcb_res_client_id_value_value(i.data);
-			result = *t;
-			break;
-		}
+	if(res != Success || actualtype == None) {
+		return(0);
 	}
 
-	free(r);
-#endif /* SWALLOWING */
+	result = (pid_t)prop;
+	XFree(prop);
 
-	if (result == (pid_t)-1)
-		result = 0;
-	return result;
+	return(result);
+#else
+	return(0);
+#endif /* SWALLOWING */
 }
 
 pid_t
@@ -2342,10 +2335,6 @@ main(int argc, char *argv[])
 		fputs("warning: no locale support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("dwm: cannot open display\n");
-#ifdef SWALLOWING
-	if (!(xcon = XGetXCBConnection(dpy)))
-		die("dwm: cannot get xcb connection\n");
-#endif
 	checkotherwm();
 	setup();
 	scan();
