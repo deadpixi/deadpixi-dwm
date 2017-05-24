@@ -14,7 +14,8 @@ X11LIB = /usr/X11R6/lib
 XINERAMALIBS  = -lXinerama
 XINERAMAFLAGS = -DXINERAMA
 
-# Swallowing, comment if you don't want it
+# Swalloing, comment if you don't want it
+SWALLOWINGLIBS = -lxcb -lX11-xcb -lxcb-res
 SWALLOWINGFLAGS = -DSWALLOWING
 
 # freetype

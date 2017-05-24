@@ -22,14 +22,12 @@
  */
 #include <errno.h>
 #include <locale.h>
-#include <netdb.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <X11/cursorfont.h>
@@ -42,12 +40,10 @@
 #include <X11/extensions/Xinerama.h>
 #endif /* XINERAMA */
 #include <X11/Xft/Xft.h>
-
-#if defined(SWALLOWING) && defined(__FreeBSD__)
-#include <libutil.h>
-#include <sys/types.h>
-#include <sys/user.h>
-#endif /* __FreeBSD__ */
+#ifdef SWALLOWING
+#include <X11/Xlib-xcb.h>
+#include <xcb/res.h>
+#endif
 
 #include "drw.h"
 #include "util.h"
@@ -68,7 +64,7 @@
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel, SchemeLast }; /* color schemes */
-enum { NetSupported, NetWMName, NetWMState, NetWMPID,
+enum { NetSupported, NetWMName, NetWMState,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
        NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
@@ -182,7 +178,6 @@ static void focus(Client *c);
 static void focusin(XEvent *e);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
-static void getfqdn(void);
 static pid_t getparentprocess(pid_t p);
 static int getrootptr(int *x, int *y);
 static long getstate(Window w);
@@ -244,7 +239,7 @@ static void updatewindowtype(Client *c);
 static void updatetitle(Client *c);
 static void updatewmhints(Client *c);
 static void view(const Arg *arg);
-static pid_t getwinpid(Window w);
+static pid_t winpid(Window w);
 static Client *wintoclient(Window w);
 static Monitor *wintomon(Window w);
 static int xerror(Display *dpy, XErrorEvent *ee);
@@ -284,7 +279,10 @@ static Display *dpy;
 static Drw *drw;
 static Monitor *mons, *selmon;
 static Window root;
-static char *hostname;
+
+#ifdef SWALLOWING
+static xcb_connection_t *xcon;
+#endif /* SWALLOWING */
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
@@ -551,7 +549,6 @@ cleanup(void)
 	XSync(dpy, False);
 	XSetInputFocus(dpy, PointerRoot, RevertToPointerRoot, CurrentTime);
 	XDeleteProperty(dpy, root, netatom[NetActiveWindow]);
-    free(hostname);
 }
 
 void
@@ -938,23 +935,6 @@ focusstack(const Arg *arg)
 	}
 }
 
-int
-getcardprop(Window w, Atom prop)
-{
-	int di;
-    int r = 0;
-	unsigned long dl;
-	unsigned char *p = NULL;
-	Atom da = None;
-
-	if (XGetWindowProperty(dpy, w, prop, 0L, sizeof(int), False, XA_CARDINAL,
-	                      &da, &di, &dl, &dl, &p) == Success && p) {
-		r = *(int *)p;
-		XFree(p);
-	}
-	return r;
-}
-
 Atom
 getatomprop(Client *c, Atom prop)
 {
@@ -969,31 +949,6 @@ getatomprop(Client *c, Atom prop)
 		XFree(p);
 	}
 	return atom;
-}
-
-void
-getfqdn(void)
-{
-    struct addrinfo hints = {0};
-    struct addrinfo *info = NULL;
-    char name[HOST_NAME_MAX + 1] = {0};
-    int r = 0;
-
-    if (gethostname(name, HOST_NAME_MAX) != 0){
-        perror("could not determine system host name");
-        hostname = strdup("unknown");
-        return;
-    }
-
-    hints.ai_flags = AI_CANONNAME;
-    if ((r = getaddrinfo(name, NULL, &hints, &info)) != 0){
-        fprintf(stderr, "could not determine fully qualified host name: %s", gai_strerror(r));
-        hostname = strdup(name);
-        return;
-    }
-
-    hostname = strdup(info->ai_canonname);
-    freeaddrinfo(info);
 }
 
 int
@@ -1150,6 +1105,7 @@ manage(Window w, XWindowAttributes *wa)
 
 	c = ecalloc(1, sizeof(Client));
 	c->win = w;
+	c->pid = winpid(w);
 	updatetitle(c);
 	if (XGetTransientForHint(dpy, w, &trans) && (t = wintoclient(trans))) {
 		c->mon = t->mon;
@@ -1157,6 +1113,7 @@ manage(Window w, XWindowAttributes *wa)
 	} else {
 		c->mon = selmon;
 		applyrules(c);
+		term = termforwin(c);
 	}
 
 	/* geometry */
@@ -1183,6 +1140,7 @@ manage(Window w, XWindowAttributes *wa)
 	updatewindowtype(c);
 	updatesizehints(c);
 	updatewmhints(c);
+	XSelectInput(dpy, w, EnterWindowMask|FocusChangeMask|PropertyChangeMask|StructureNotifyMask);
 	grabbuttons(c, 0);
 	if (!c->isfloating)
 		c->isfloating = c->oldstate = trans != None || c->isfixed;
@@ -1190,7 +1148,6 @@ manage(Window w, XWindowAttributes *wa)
 		XRaiseWindow(dpy, c->win);
 	attach(c);
 	attachstack(c);
-	XSelectInput(dpy, w, EnterWindowMask|FocusChangeMask|PropertyChangeMask|StructureNotifyMask);
 	XChangeProperty(dpy, root, netatom[NetClientList], XA_WINDOW, 32, PropModeAppend,
 	                (unsigned char *) &(c->win), 1);
 	XMoveResizeWindow(dpy, c->win, c->x + 2 * sw, c->y, c->w, c->h); /* some windows require this */
@@ -1200,8 +1157,6 @@ manage(Window w, XWindowAttributes *wa)
 	c->mon->sel = c;
 	arrange(c->mon);
 	XMapWindow(dpy, c->win);
-	c->pid = getwinpid(w);
-	term = termforwin(c);
 	if (term)
 		swallow(term, c);
 	focus(NULL);
@@ -1692,7 +1647,6 @@ setup(void)
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
-    netatom[NetWMPID] = XInternAtom(dpy, "_NET_WM_PID", False);
 	/* init cursors */
 	cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
 	cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -2176,53 +2130,58 @@ view(const Arg *arg)
 }
 
 pid_t
-getwinpid(Window w)
+winpid(Window w)
 {
-    pid_t p = 0;
+	pid_t result = 0;
+
 #ifdef SWALLOWING
-    char host[HOST_NAME_MAX + 1];
-	p = (pid_t)getcardprop(w, netatom[NetWMPID]);
-    if (!p)
-        return (pid_t)0;
+	xcb_res_client_id_spec_t spec = {0};
+	spec.client = w;
+	spec.mask = XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID;
 
-    if (!gettextprop(w, XA_WM_CLIENT_MACHINE, host, HOST_NAME_MAX))
-        return (pid_t)0;
+	xcb_generic_error_t *e = NULL;
+	xcb_res_query_client_ids_cookie_t c = xcb_res_query_client_ids(xcon, 1, &spec);
+	xcb_res_query_client_ids_reply_t *r = xcb_res_query_client_ids_reply(xcon, c, &e);
 
-    if (strcmp(host, hostname) != 0)
-        return (pid_t)0;
-#endif
-	return p;
+	if (!r)
+		return (pid_t)0;
+
+	xcb_res_client_id_value_iterator_t i = xcb_res_query_client_ids_ids_iterator(r);
+	for (; i.rem; xcb_res_client_id_value_next(&i)) {
+		spec = i.data->spec;
+		if (spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID) {
+			uint32_t *t = xcb_res_client_id_value_value(i.data);
+			result = *t;
+			break;
+		}
+	}
+
+	free(r);
+#endif /* SWALLOWING */
+
+	if (result == (pid_t)-1)
+		result = 0;
+	return result;
 }
 
 pid_t
 getparentprocess(pid_t p)
 {
-    pid_t v = 0;
+	unsigned int v = 0;
 
-#if defined(__linux__)
+#ifdef __linux__
 	FILE *f;
 	char buf[256];
 	snprintf(buf, sizeof(buf) - 1, "/proc/%u/stat", (unsigned)p);
 
 	if (!(f = fopen(buf, "r")))
-		return (pid_t)0;
+		return 0;
 
-	if (fscanf(f, "%*u %*s %*c %u", (unsigned *)&v) != 1)
-        v = (pid_t)0;
+	fscanf(f, "%*u %*s %*c %u", &v);
 	fclose(f);
+#endif /* __linux__ */
 
-#elif defined(__FreeBSD__)
-    struct kinfo_proc *proc;
-
-    proc = kinfo_getproc(p);
-    if (proc == NULL){
-        return (pid_t)0;
-
-    v = proc->ki_ppid;
-    free(proc);
-#endif
-
-	return v;
+	return (pid_t)v;
 }
 
 int
@@ -2363,8 +2322,11 @@ main(int argc, char *argv[])
 		fputs("warning: no locale support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("dwm: cannot open display\n");
+#ifdef SWALLOWING
+	if (!(xcon = XGetXCBConnection(dpy)))
+		die("dwm: cannot get xcb connection\n");
+#endif
 	checkotherwm();
-    getfqdn();
 	setup();
 	scan();
 	run();

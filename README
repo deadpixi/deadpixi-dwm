@@ -58,4 +58,3 @@ config.h) will "swallow" windows opened by descendant processes,
 similar to the behavior of Plan 9's rio.  This feature helps avoid
 a proliferation of terminals used only to launch other commands.
 
-Credit to technoprole for the FreeBSD support.
